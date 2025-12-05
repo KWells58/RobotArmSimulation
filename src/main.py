@@ -1,7 +1,7 @@
 import openvr
 import time
-from src.controllers.vive_controller import ViveController
-from src.simulation.robo_env import create_environment, apply_action
+from src.controllers import ViveController
+from src.simulation import create_environment, apply_action
 
 def main():
     openvr.init(openvr.VRApplication_Scene)
