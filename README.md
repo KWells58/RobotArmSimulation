@@ -13,7 +13,7 @@ A Python-based teleoperation system for a UR5e robot arm in a robosuite simulati
 - Modular Python project for easy expansion
 
 ## Folder Structure
-
+```
 RobotArmSimulation/
 ├─ src/
 │  ├─ main.py
@@ -26,6 +26,7 @@ RobotArmSimulation/
 ├─ venv/  # Python virtual environment
 ├─ README.md
 └─ requirements.txt  # Project dependencies
+```
 
 ## Requirements
 
