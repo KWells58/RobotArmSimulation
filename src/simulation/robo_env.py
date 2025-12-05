@@ -1,7 +1,3 @@
-import warnings
-warnings.filterwarnings("ignore", category=UserWarning, module="robosuite")
-
-
 import robosuite
 from robosuite.controllers import load_part_controller_config as load_controller_config
 import numpy as np
