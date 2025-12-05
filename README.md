@@ -46,7 +46,7 @@ RobotArmSimulation/
 git clone https://github.com/KWells58/RobotArmSimulation.git
 cd RobotArmSimulation
 
-2. Create a virtual environment (if not already created):
+2. Create a virtual environment:
 
 python -m venv venv
 
@@ -66,7 +66,7 @@ pip install -r requirements.txt
 - Place `mujoco.dll` (Windows) or `libmujoco.so` (Linux) in a location accessible by Python or update your PATH/LD_LIBRARY_PATH
 - Test Mujoco installation with `import mujoco` in Python
 
-6. Set up robosuite macros (optional but recommended):
+6. Set up robosuite macros:
 
 python venv/Lib/site-packages/robosuite/scripts/setup_macros.py
 
