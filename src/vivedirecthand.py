@@ -2,8 +2,7 @@ import numpy as np
 import openvr
 import time
 import robosuite
-from robosuite import load_controller_config
-
+from robosuite.controllers import load_part_controller_config as load_controller_config
 # ============================================================
 # Simplified Vive Controller Wrapper (no wrist rotation)
 # ============================================================
