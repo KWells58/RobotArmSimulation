@@ -62,8 +62,8 @@ pip install -r requirements.txt
 
 5. Install and configure Mujoco:
 
-- Download Mujoco 2.x from the Mujoco website
-- Place `mujoco.dll` (Windows) or `libmujoco.so` (Linux) in a location accessible by Python or update your PATH/LD_LIBRARY_PATH
+- Download Mujoco from the Mujoco website
+- Place `mujoco.dll` (Windows) or `libmujoco.so` (Linux) in a location accessible by Python or update your PATH/LD_LIBRARY_PATH, I put it in the robosuite utils package in the venv
 - Test Mujoco installation with `import mujoco` in Python
 
 6. Set up robosuite macros:
