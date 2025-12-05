@@ -1,13 +1,11 @@
 import robosuite
-from robosuite.controllers import load_part_controller_config as load_controller_config
+from robosuite.controllers import load_composite_controller_config
 import numpy as np
 
 def create_environment():
-    controller_config = load_controller_config(default_controller="OSC_POSE")
     env = robosuite.make(
         "Lift",
         robots=["UR5e"],
-        controller_configs=controller_config,
         gripper_types="default",
         env_configuration="single-arm-opposed",
         has_renderer=True,
