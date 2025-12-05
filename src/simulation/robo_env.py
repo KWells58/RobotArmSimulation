@@ -20,6 +20,12 @@ def create_environment():
     return env, obs
 
 def apply_action(env, state):
-    drot = np.zeros(3)
+    """
+    state: dict with keys
+        - dpos: 3D position delta
+        - drot: 3D rotation delta (optional)
+        - grasp: -1 or 1 for open/close
+    """
+    drot = state.get("drot", np.zeros(3))  # optional rotation
     action = np.concatenate([state["dpos"], drot, [state["grasp"]]])
     return env.step(action)

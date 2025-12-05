@@ -1,37 +1,42 @@
-import openvr
 import time
-from src.controllers import ViveController
+import openvr
+from src.controllers.vive_controller import ViveController
 from src.simulation import create_environment, apply_action
 
+
 def main():
+    # Initialize OpenVR
     openvr.init(openvr.VRApplication_Scene)
 
-    poses_type = openvr.TrackedDevicePose_t * openvr.k_unMaxTrackedDeviceCount
-    render_poses = poses_type()
-    game_poses = poses_type()
-
-    env, obs = create_environment()
-    env.render()
-
-    vr = ViveController(device_id=4)
-    print("\n[VR] Teleoperation started. Trackpad XY -> planar, Z -> vertical.\n")
-
     try:
+        # Create Robosuite environment
+        env, obs = create_environment()
+        env.render()
+
+        # Initialize ViveController (Robosuite-style)
+        vr = ViveController(env=env, device_id=4)
+        vr.start_control()
+
+        print("\n[VR] Teleoperation started. Trackpad XY -> planar, Z -> vertical.\n")
+
+        # Main control loop
         while True:
-            openvr.VRCompositor().waitGetPoses(render_poses, game_poses)
-            state = vr.update(render_poses)
+            state = vr.get_controller_state()  # gets smoothed 6-DOF + grasp + reset
 
             if state is not None:
-                obs, _, _, _ = apply_action(env, state)
+                # Apply action to the environment
+                obs, reward, done, info = apply_action(env, state)
 
             env.render()
-            time.sleep(0.01)
+            time.sleep(0.01)  # 100 Hz control loop
 
     except KeyboardInterrupt:
-        print("\nExiting...")
+        print("\nExiting VR teleoperation...")
 
     finally:
         openvr.shutdown()
+        env.close()
+
 
 if __name__ == "__main__":
     main()
