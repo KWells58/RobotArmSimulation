@@ -20,9 +20,6 @@ class ViveController:
       - Motion is ONLY active while you're touching the trackpad or holding GRIP
       - Trigger toggles gripper open/close (edge-detected)
       - Menu button resets origin (re-zeros Z reference)
-
-    Output dict matches your apply_action():
-      { "dpos": np.array(3,), "grasp": float(-1 or 1), "reset": bool }
     """
 
     def __init__(
