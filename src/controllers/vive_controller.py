@@ -58,7 +58,6 @@ class ViveController:
         deadzone_rot: float = 0.004,
         max_step_pos: float = 0.12,
         max_step_rot: float = 0.24,
-        enable_rotation: bool = False,
         _dbg_t=0.0,
         _dbg_every=0.25,
     ):
@@ -72,7 +71,6 @@ class ViveController:
         self.deadzone_rot = float(deadzone_rot)
         self.max_step_pos = float(max_step_pos)
         self.max_step_rot = float(max_step_rot)
-        self.enable_rotation = bool(enable_rotation)
 
         self._dbg_t = _dbg_t
         self._dbg_every = _dbg_every
@@ -159,26 +157,18 @@ class ViveController:
             dpos_world = (pos - self.prev_pos).astype(np.float32)
             self.prev_pos = pos.copy()
 
-            # Map VR world translation into the robot teleop frame
-            # (keeps the previous "planar feels right" axis convention)
-            dpos_robot = np.array(
-                [dpos_world[1], dpos_world[0], dpos_world[2]],
-                dtype=np.float32,
-            )
-
-            dpos_robot[np.abs(dpos_robot) < self.deadzone_pos] = 0.0
-            target_dpos = dpos_robot * self.pos_scale
-            target_dpos = _clip_norm(target_dpos, self.max_step_pos)
-
-            if self.enable_rotation:
-                rel_rot = rot @ self.prev_rot.T
-                drot_world = _rotation_vector_from_matrix(rel_rot)
-                drot_world[np.abs(drot_world) < self.deadzone_rot] = 0.0
-                target_drot = _clip_norm(drot_world * self.rot_scale, self.max_step_rot)
-            else:
-                target_drot = np.zeros(3, dtype=np.float32)
-
+            rel_rot = rot @ self.prev_rot.T
+            drot_world = _rotation_vector_from_matrix(rel_rot)
             self.prev_rot = rot.copy()
+
+            dpos_world[np.abs(dpos_world) < self.deadzone_pos] = 0.0
+            drot_world[np.abs(drot_world) < self.deadzone_rot] = 0.0
+
+            target_dpos = dpos_world * self.pos_scale
+            target_drot = drot_world * self.rot_scale
+
+            target_dpos = _clip_norm(target_dpos, self.max_step_pos)
+            target_drot = _clip_norm(target_drot, self.max_step_rot)
 
         self.s_dpos = self._smooth_val(self.s_dpos, target_dpos)
         self.s_drot = self._smooth_val(self.s_drot, target_drot)
@@ -188,7 +178,7 @@ class ViveController:
             self._dbg_t = now
             cls = openvr.VRSystem().getTrackedDeviceClass(self.device_id)
             print(
-                f"[VIVE] valid={pose.bPoseIsValid} class={cls} clutch={grip_down} rot_en={self.enable_rotation} "
+                f"[VIVE] valid={pose.bPoseIsValid} class={cls} clutch={grip_down} "
                 f"dpos={self.s_dpos} drot={self.s_drot}"
             )
 

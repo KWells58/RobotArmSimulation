@@ -89,7 +89,7 @@ python -m src.main
 
 - Hold **Grip** → enable motion clutch (required for movement)
 - Controller translation (while gripping) → end-effector XYZ motion
-- Controller rotation (while gripping) → available when `enable_rotation=True` (disabled by default for stability)
+- Controller rotation (while gripping) → end-effector orientation motion
 - **Trigger** → toggle gripper open/close
 - **Menu** → reset tracking origin and motion filters
 
@@ -98,7 +98,6 @@ python -m src.main
 If motion feels too sensitive or too slow, tune these parameters in `ViveController(...)`:
 
 - `pos_scale`
-- `enable_rotation`
 - `rot_scale`
 - `deadzone_pos`
 - `deadzone_rot`

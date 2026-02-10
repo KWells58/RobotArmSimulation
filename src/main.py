@@ -53,7 +53,7 @@ def main():
         "\n[VR] Teleoperation started.\n"
         "Hold GRIP -> clutch enable for 6-DOF motion\n"
         "Controller translation -> end-effector XYZ\n"
-        "Controller rotation -> currently disabled by default for stability\n"
+        "Controller rotation -> end-effector orientation\n"
         "Trigger -> toggle gripper\n"
         "Menu -> reset origin\n",
         flush=True,
