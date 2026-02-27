@@ -101,8 +101,8 @@ def _get_ee_pose_from_obs(obs: dict, prefix: str):
 def main():
     # -------- choose env here --------
     # Single arm:
-    env_name = "Lift"
-    robots = ("UR5e",)
+    env_name = "TwoArmLift"
+    robots = ("UR5e","UR5e")
 
     # Example dual-arm (ONLY if your robosuite has it):
     # env_name = "TwoArmLift"
