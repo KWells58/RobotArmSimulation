@@ -5,7 +5,7 @@ import numpy as np
 def create_environment():
     env = robosuite.make(
         "Lift",
-        robots=["UR5e"],
+        robots= ["Pandas"],
         gripper_types="default",
         env_configuration="single-arm-opposed",
         has_renderer=True,
