@@ -1,91 +1,146 @@
 import time
 import numpy as np
+import openvr
 
 from src.controllers import ViveController
 from src.simulation import create_environment, apply_action
 
 
-def _get_ee_pose_from_obs(obs: dict):
+def pick_vive_controller(prefer_role: str = "right") -> int | None:
     """
-    Try common robosuite observation keys. Adjust if your obs uses different names.
-    Returns (ee_pos(3,), ee_rotmat(3,3)).
+    Returns a tracked device index for a Vive controller.
+    Prefers right/left hand role if SteamVR reports it, otherwise falls back.
     """
-    # Common robosuite key patterns (varies by env/controller config)
-    candidates_pos = [
-        "robot0_eef_pos",
-        "eef_pos",
-        "robot0_gripper_pos",
+    vr = openvr.VRSystem()
+
+    role_left = getattr(openvr, "TrackedControllerRole_LeftHand", 1)
+    role_right = getattr(openvr, "TrackedControllerRole_RightHand", 2)
+    target_role = role_right if prefer_role.lower() == "right" else role_left
+
+    # Prefer matching role
+    for i in range(openvr.k_unMaxTrackedDeviceCount):
+        if vr.getTrackedDeviceClass(i) == openvr.TrackedDeviceClass_Controller:
+            role = vr.getControllerRoleForTrackedDeviceIndex(i)
+            if role == target_role:
+                return i
+
+    # Fallback: first controller found
+    for i in range(openvr.k_unMaxTrackedDeviceCount):
+        if vr.getTrackedDeviceClass(i) == openvr.TrackedDeviceClass_Controller:
+            return i
+
+    return None
+
+
+def quat_xyzw_to_rotmat(quat: np.ndarray) -> np.ndarray:
+    x, y, z, w = [float(v) for v in quat]
+    xx, yy, zz = x*x, y*y, z*z
+    xy, xz, yz = x*y, x*z, y*z
+    wx, wy, wz = w*x, w*y, w*z
+    return np.array(
+        [
+            [1 - 2*(yy + zz),     2*(xy - wz),     2*(xz + wy)],
+            [    2*(xy + wz), 1 - 2*(xx + zz),     2*(yz - wx)],
+            [    2*(xz - wy),     2*(yz + wx), 1 - 2*(xx + yy)],
+        ],
+        dtype=np.float64,
+    )
+
+
+def _get_ee_pose_from_obs(obs: dict, prefix: str):
+    """
+    prefix examples: "robot0", "robot1"
+    Returns (ee_pos(3,), ee_rotmat(3,3))
+
+    Works with typical robosuite key names:
+      {prefix}_eef_pos
+      {prefix}_eef_quat
+      {prefix}_eef_rot   (if exists)
+    """
+    pos_key_candidates = [
+        f"{prefix}_eef_pos",
+        f"{prefix}_gripper_pos",
+        "robot0_eef_pos",  # extra fallback
     ]
-    candidates_quat = [
-        "robot0_eef_quat",
-        "eef_quat",
-        "robot0_gripper_quat",
+    rot_key_candidates = [
+        f"{prefix}_eef_rot",
+        f"{prefix}_gripper_rot",
     ]
-    candidates_mat = [
-        "robot0_eef_rot",
-        "eef_rot",
-        "robot0_gripper_rot",
+    quat_key_candidates = [
+        f"{prefix}_eef_quat",
+        f"{prefix}_gripper_quat",
     ]
 
     ee_pos = None
-    for k in candidates_pos:
+    for k in pos_key_candidates:
         if k in obs:
             ee_pos = np.asarray(obs[k], dtype=np.float64).reshape(3)
             break
 
-    ee_rotmat = None
-    # If rot matrix exists, use it
-    for k in candidates_mat:
+    ee_R = None
+    for k in rot_key_candidates:
         if k in obs:
-            ee_rotmat = np.asarray(obs[k], dtype=np.float64).reshape(3, 3)
+            ee_R = np.asarray(obs[k], dtype=np.float64).reshape(3, 3)
             break
 
-    # Else try quaternion -> matrix (xyzw is typical in robosuite; sometimes wxyz)
-    if ee_rotmat is None:
+    if ee_R is None:
         quat = None
-        for k in candidates_quat:
+        for k in quat_key_candidates:
             if k in obs:
                 quat = np.asarray(obs[k], dtype=np.float64).reshape(4)
                 break
         if quat is not None:
-            # Heuristic: if |w| is last element and looks like a unit quat, assume xyzw.
-            # If your env uses wxyz, swap accordingly.
-            x, y, z, w = quat
-            # quat -> rotmat
-            xx, yy, zz = x*x, y*y, z*z
-            xy, xz, yz = x*y, x*z, y*z
-            wx, wy, wz = w*x, w*y, w*z
-            ee_rotmat = np.array([
-                [1 - 2*(yy + zz),     2*(xy - wz),     2*(xz + wy)],
-                [    2*(xy + wz), 1 - 2*(xx + zz),     2*(yz - wx)],
-                [    2*(xz - wy),     2*(yz + wx), 1 - 2*(xx + yy)],
-            ], dtype=np.float64)
+            ee_R = quat_xyzw_to_rotmat(quat)
 
-    if ee_pos is None or ee_rotmat is None:
-        raise KeyError(
-            "Couldn't find EE pose in obs. Print(obs.keys()) and update _get_ee_pose_from_obs()."
-        )
+    if ee_pos is None or ee_R is None:
+        raise KeyError(f"Couldn't find EE pose for {prefix}. Available keys include: {list(obs.keys())[:30]} ...")
 
-    return ee_pos, ee_rotmat
+    return ee_pos, ee_R
 
 
 def main():
+    # -------- choose env here --------
+    # Single arm:
+    env_name = "Lift"
+    robots = ("UR5e",)
+
+    # Example dual-arm (ONLY if your robosuite has it):
+    # env_name = "TwoArmLift"
+    # robots = ("Panda", "Panda")
+
     print("[DEBUG] creating robosuite env...", flush=True)
-    env, obs = create_environment()
+    env, obs = create_environment(env_name=env_name, robots=robots)
     env.render()
 
-    ee_pos, ee_rotmat = _get_ee_pose_from_obs(obs)
+    adim = int(getattr(env, "action_dim", 0))
+    dual_arm = adim >= 14
+    print(f"[DEBUG] env_name={env_name} robots={robots} action_dim={adim} dual_arm={dual_arm}", flush=True)
 
-    # Vive controller polls OpenVR internally (no compositor)
-    vr = ViveController(device_id=None, hmd_relative=True)
+    # Init OpenVR once here (so role picking works reliably)
+    openvr.init(openvr.VRApplication_Other)
 
-    # Calibrate once at start so controller pose is anchored to current EE pose
-    vr.start_control(ee_pos, ee_rotmat)
+    right_id = pick_vive_controller("right")
+    left_id = pick_vive_controller("left")
+    print(f"[DEBUG] Vive device ids: right={right_id} left={left_id}", flush=True)
+
+    # Create controllers (hmd_relative helps desk setups)
+    vr_right = ViveController(device_id=right_id, hmd_relative=True)
+    vr_left = ViveController(device_id=left_id, hmd_relative=True) if dual_arm else None
+
+    # Calibrate at start
+    if not dual_arm:
+        ee_pos, ee_R = _get_ee_pose_from_obs(obs, "robot0")
+        vr_right.start_control(ee_pos, ee_R)
+    else:
+        eeR_pos, eeR_R = _get_ee_pose_from_obs(obs, "robot0")
+        eeL_pos, eeL_R = _get_ee_pose_from_obs(obs, "robot1")
+        vr_right.start_control(eeR_pos, eeR_R)
+        if vr_left is not None:
+            vr_left.start_control(eeL_pos, eeL_R)
 
     print(
         "\n[VR] Teleoperation started.\n"
-        "Hold GRIP -> clutch enable (absolute pose anchored)\n"
-        "Controller absolute pose -> target EE pose\n"
+        "Hold GRIP -> clutch enable\n"
         "Trigger -> toggle gripper\n"
         "Menu -> recalibrate (bind controller to current EE)\n",
         flush=True,
@@ -93,14 +148,24 @@ def main():
 
     try:
         while True:
-            # Get latest EE pose
-            ee_pos, ee_rotmat = _get_ee_pose_from_obs(obs)
+            if not dual_arm:
+                ee_pos, ee_R = _get_ee_pose_from_obs(obs, "robot0")
+                stR = vr_right.update(ee_pos, ee_R)
+                if stR is not None:
+                    obs, _, _, _ = apply_action(env, stR)
+            else:
+                eeR_pos, eeR_R = _get_ee_pose_from_obs(obs, "robot0")
+                eeL_pos, eeL_R = _get_ee_pose_from_obs(obs, "robot1")
 
-            # Get VR command deltas for OSC_POSE
-            state = vr.update(ee_pos, ee_rotmat)
+                stR = vr_right.update(eeR_pos, eeR_R)
 
-            if state is not None:
-                obs, _, _, _ = apply_action(env, state)
+                stL = None
+                if vr_left is not None:
+                    stL = vr_left.update(eeL_pos, eeL_R)
+
+                # Apply both (packing handled inside apply_action)
+                if stR is not None or stL is not None:
+                    obs, _, _, _ = apply_action(env, stR, stL)
 
             env.render()
             time.sleep(0.01)
@@ -109,9 +174,7 @@ def main():
         print("\nExiting...")
 
     finally:
-        # ViveController opens OpenVR internally; we shut it down there by letting process end.
-        # If you want explicit cleanup, add vr.shutdown() method and call it here.
-        pass
+        openvr.shutdown()
 
 
 if __name__ == "__main__":
