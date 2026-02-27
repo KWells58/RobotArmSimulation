@@ -1,6 +1,5 @@
 # vive_controller.py
 # Vive (OpenVR) controller -> robosuite OSC_POSE deltas
-# Translation is the same as your "perfect" version.
 # Adds stable orientation control (yaw-only by default).
 
 import time
@@ -77,7 +76,6 @@ class ViveController:
     """
     Stable Vive teleop for robosuite OSC_POSE.
 
-    - Translation: identical behavior as your good version
     - Rotation: relative controller rotation since clutch, applied to EE target
       * Start with rotation_mode="yaw" (recommended)
       * Switch to "rpy" for full orientation once yaw feels right
