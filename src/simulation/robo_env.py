@@ -72,7 +72,7 @@ def apply_action(env, state_right: dict | None, state_left: dict | None = None):
     aL = np.zeros(7, dtype=np.float32) if state_left is None else state_to_osc_action(state_left)
 
     # Default packing: [RIGHT, LEFT]
-    action = np.concatenate([aR, aL], dtype=np.float32)
+    action = np.concatenate([aL, aR], dtype=np.float32)
 
     # If your env wants [LEFT, RIGHT], use this instead:
     # action = np.concatenate([aL, aR], dtype=np.float32)

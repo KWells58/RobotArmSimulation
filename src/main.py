@@ -110,7 +110,11 @@ def main():
 
     print("[DEBUG] creating robosuite env...", flush=True)
     env, obs = create_environment(env_name=env_name, robots=robots)
-    env.render()
+
+    #print("action_dim:", env.action_dim)
+    #if hasattr(env, "action_spec"):
+    #    print("action_spec:", env.action_spec)
+    #env.render()
 
     adim = int(getattr(env, "action_dim", 0))
     dual_arm = adim >= 14
