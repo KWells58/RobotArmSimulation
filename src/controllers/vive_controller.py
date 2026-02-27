@@ -1,11 +1,17 @@
 # vive_controller.py
 # Vive (OpenVR) controller -> robosuite OSC_POSE deltas
 # Adds stable orientation control (yaw-only by default).
+#
+# MENU behavior:
+#   - short press  : re-anchor (reset) to current EE pose
+#   - long press   : request "home" (main should restore sim-start pose, then re-anchor)
+#
+# Returned dict includes:
+#   { dpos, drot, grasp, reset, home }
 
 import time
 import numpy as np
 import openvr
-
 
 EPS = 1e-9
 
@@ -55,15 +61,6 @@ def _rotation_vector_from_matrix(r_mat: np.ndarray) -> np.ndarray:
     return (axis * theta).astype(np.float32)
 
 
-def _yaw_from_R(R: np.ndarray) -> float:
-    """
-    Extract yaw about +Z from a Z-up rotation matrix.
-    Assumes R maps local->world. Uses world-projected local X axis.
-    """
-    xw = R[:, 0]
-    return float(np.arctan2(xw[1], xw[0]))
-
-
 def _Rz(yaw: float) -> np.ndarray:
     c = float(np.cos(yaw))
     s = float(np.sin(yaw))
@@ -76,11 +73,16 @@ class ViveController:
     """
     Stable Vive teleop for robosuite OSC_POSE.
 
-    - Rotation: relative controller rotation since clutch, applied to EE target
-      * Start with rotation_mode="yaw" (recommended)
-      * Switch to "rpy" for full orientation once yaw feels right
+    - Translation: controller motion since clutch -> EE position target
+    - Rotation:
+        rotation_mode="yaw": apply only yaw component (stable)
+        rotation_mode="rpy": apply full relative rotation
+    - GRIP is the clutch (only moves while held)
+    - MENU short press: re-anchor to current EE pose
+    - MENU long press: request "home" (handled in main)
     """
 
+    # Your observed menu bit mapping (bit index, not mask)
     MENU_BIT = 32
 
     # Keep SAME translation mapping:
@@ -99,7 +101,7 @@ class ViveController:
         device_id: int | None = None,
 
         # speed / feel
-        pos_scale: float = 5,
+        pos_scale: float = 5.0,
         max_step_pos: float = 0.18,
         smooth: float = 0.10,
         deadzone_pos: float = 0.0006,
@@ -113,6 +115,9 @@ class ViveController:
 
         universe: int = openvr.TrackingUniverseStanding,
         hmd_relative: bool = False,
+
+        # menu long press threshold (sec)
+        menu_hold_sec: float = 0.6,
 
         dbg_every: float = 0.0,
     ):
@@ -134,6 +139,8 @@ class ViveController:
 
         self.universe = universe
         self.hmd_relative = bool(hmd_relative)
+
+        self.menu_hold_sec = float(menu_hold_sec)
 
         self.dbg_every = float(dbg_every)
         self._dbg_t = 0.0
@@ -157,7 +164,13 @@ class ViveController:
         self.last_trigger = False
         self.gripper = -1.0
 
+        # flags
         self.reset = False
+        self.home = False
+
+        # menu press tracking (for long press)
+        self._menu_down = False
+        self._menu_t0 = 0.0
 
     # ---------------- OpenVR init + picking ----------------
 
@@ -226,6 +239,21 @@ class ViveController:
         except Exception:
             return None
 
+    # ---------------- Helpers ----------------
+
+    def _reanchor_to_current(self, ee_pos: np.ndarray, ee_rotmat: np.ndarray, R_ctrl: np.ndarray, p_vr: np.ndarray):
+        """Bind controller pose to current EE pose so there is no jump."""
+        self.ctrl_pos_at_clutch_vr = p_vr.copy()
+        self.ee_pos_at_clutch = ee_pos.copy()
+
+        self.ctrl_R_at_clutch = R_ctrl.copy()
+        self.ee_R_at_clutch = ee_rotmat.copy()
+        self.target_R = ee_rotmat.copy()
+
+        self.s_dpos[:] = 0.0
+        self.s_drot[:] = 0.0
+        self._last_grip = False
+
     # ---------------- Public API ----------------
 
     def start_control(self, ee_pos: np.ndarray, ee_rotmat: np.ndarray) -> None:
@@ -236,22 +264,23 @@ class ViveController:
         ee_pos = np.asarray(ee_pos, dtype=np.float64).reshape(3)
         ee_rotmat = np.asarray(ee_rotmat, dtype=np.float64).reshape(3, 3)
 
-        self.ctrl_pos_at_clutch_vr = p.copy()
-        self.ee_pos_at_clutch = ee_pos.copy()
-
-        self.ctrl_R_at_clutch = R_ctrl.copy()
-        self.ee_R_at_clutch = ee_rotmat.copy()
-        self.target_R = ee_rotmat.copy()
+        self._reanchor_to_current(ee_pos, ee_rotmat, R_ctrl, p)
 
         self.s_dpos[:] = 0.0
         self.s_drot[:] = 0.0
         self.gripper = -1.0
         self.last_trigger = False
         self.reset = False
-        self._last_grip = False
+        self.home = False
+
+        # reset menu state
+        self._menu_down = False
+        self._menu_t0 = 0.0
 
     def update(self, ee_pos: np.ndarray, ee_rotmat: np.ndarray):
+        # clear per-frame flags
         self.reset = False
+        self.home = False
 
         ok, R_ctrl, p_vr = self._poll_pose_raw_vr()
         if not ok:
@@ -266,23 +295,31 @@ class ViveController:
 
         pressed = int(state.ulButtonPressed)
 
-        # MENU bit32 => reset anchors
-        menu_pressed = (pressed & (1 << self.MENU_BIT)) != 0
-        if menu_pressed:
-            self.ctrl_pos_at_clutch_vr = p_vr.copy()
-            self.ee_pos_at_clutch = ee_pos.copy()
+        # -------- MENU short/long press handling (fires on RELEASE) --------
+        menu_now = (pressed & (1 << self.MENU_BIT)) != 0
 
-            self.ctrl_R_at_clutch = R_ctrl.copy()
-            self.ee_R_at_clutch = ee_rotmat.copy()
-            self.target_R = ee_rotmat.copy()
+        # rising edge
+        if menu_now and not self._menu_down:
+            self._menu_down = True
+            self._menu_t0 = time.time()
 
-            self.s_dpos[:] = 0.0
-            self.s_drot[:] = 0.0
-            self.reset = True
-            self._last_grip = False
-            return None
+        # falling edge -> decide short vs long
+        if (not menu_now) and self._menu_down:
+            self._menu_down = False
+            held = time.time() - self._menu_t0
 
-        # GRIP clutch
+            if held >= self.menu_hold_sec:
+                # long press => request home (main should restore sim-start pose)
+                self.home = True
+                # IMPORTANT: don't reanchor here; main will restore home then call start_control()
+                return {"home": True}
+            else:
+                # short press => re-anchor to current EE pose
+                self._reanchor_to_current(ee_pos, ee_rotmat, R_ctrl, p_vr)
+                self.reset = True
+                return None
+
+        # -------- GRIP clutch --------
         grip_id = getattr(openvr, "k_EButton_Grip", 2)
         grip_down = (pressed & (1 << grip_id)) != 0
 
@@ -295,12 +332,7 @@ class ViveController:
 
         # Clutch edge => anchor
         if grip_down and not self._last_grip:
-            self.ctrl_pos_at_clutch_vr = p_vr.copy()
-            self.ee_pos_at_clutch = ee_pos.copy()
-
-            self.ctrl_R_at_clutch = R_ctrl.copy()
-            self.ee_R_at_clutch = ee_rotmat.copy()
-            self.target_R = ee_rotmat.copy()
+            self._reanchor_to_current(ee_pos, ee_rotmat, R_ctrl, p_vr)
 
         self._last_grip = grip_down
 
@@ -325,25 +357,19 @@ class ViveController:
                 R_rel_ctrl = R_ctrl @ self.ctrl_R_at_clutch.T
 
                 if self.rotation_mode == "yaw":
-                    # keep only yaw-like component, computed around robot +Z using projected X axis
-                    # We approximate by applying yaw extracted from controller rel rotation to EE.
-                    # Extract yaw from R_rel_ctrl by interpreting it as Z-up-ish in our target space:
-                    # We'll convert controller rel rotation into an axis-angle and project to Z if needed.
-                    # Simpler: derive yaw from a ZYX decomposition-like on the rel matrix:
+                    # yaw from rel rotation (about +Z)
                     yaw = float(np.arctan2(R_rel_ctrl[1, 0], R_rel_ctrl[0, 0]))
                     yaw *= self.rot_scale
                     yaw = float(np.clip(yaw, -self.max_step_rot, self.max_step_rot))
                     self.target_R = _Rz(yaw) @ self.ee_R_at_clutch
                 else:
-                    # full orientation: apply controller rel rotation directly, scaled in angle
+                    # full orientation: apply controller rel rotation, scaled + clamped
                     rv = _rotation_vector_from_matrix(R_rel_ctrl).astype(np.float64)
                     ang = float(np.linalg.norm(rv))
                     if ang > EPS:
                         axis = rv / ang
                         ang_s = self.rot_scale * ang
-                        # clamp per-step
                         ang_s = float(np.clip(ang_s, -self.max_step_rot, self.max_step_rot))
-                        # Rodrigues
                         K = np.array(
                             [[0, -axis[2], axis[1]],
                              [axis[2], 0, -axis[0]],
@@ -379,4 +405,5 @@ class ViveController:
             "drot": self.s_drot.copy(),
             "grasp": float(self.gripper),
             "reset": bool(self.reset),
+            "home": bool(self.home),
         }

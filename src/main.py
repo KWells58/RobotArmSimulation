@@ -111,6 +111,24 @@ def main():
     print("[DEBUG] creating robosuite env...", flush=True)
     env, obs = create_environment(env_name=env_name, robots=robots)
 
+    #home snapshot
+    home_qpos = env.sim.data.qpos.copy()
+    home_qvel = env.sim.data.qvel.copy()
+    def restore_home():
+        """Restore sim to start state, forward, and fetch fresh observations."""
+        env.sim.data.qpos[:] = home_qpos
+        env.sim.data.qvel[:] = home_qvel
+
+        # Forward the physics so derived quantities update
+        if hasattr(env.sim, "forward"):
+            env.sim.forward()
+        # Get a fresh obs without calling reset() (keeps episode running)
+        if hasattr(env, "_get_observations"):
+            return env._get_observations()
+        # Fallback (rare)
+        return env.reset()
+    
+
     #print("action_dim:", env.action_dim)
     #if hasattr(env, "action_spec"):
     #    print("action_spec:", env.action_spec)
@@ -149,25 +167,47 @@ def main():
         "Menu -> recalibrate (bind controller to current EE)\n",
         flush=True,
     )
+    
 
     try:
         while True:
             if not dual_arm:
                 ee_pos, ee_R = _get_ee_pose_from_obs(obs, "robot0")
                 stR = vr_right.update(ee_pos, ee_R)
+
+                # -------- HOME REQUEST (single arm) --------
+                if stR is not None and stR.get("home", False):
+                    obs = restore_home()
+                    ee_pos, ee_R = _get_ee_pose_from_obs(obs, "robot0")
+                    vr_right.start_control(ee_pos, ee_R)
+                    continue
+                # ------------------------------------------
+
                 if stR is not None:
                     obs, _, _, _ = apply_action(env, stR)
+
             else:
                 eeR_pos, eeR_R = _get_ee_pose_from_obs(obs, "robot0")
                 eeL_pos, eeL_R = _get_ee_pose_from_obs(obs, "robot1")
 
                 stR = vr_right.update(eeR_pos, eeR_R)
+                stL = vr_left.update(eeL_pos, eeL_R) if vr_left is not None else None
 
-                stL = None
-                if vr_left is not None:
-                    stL = vr_left.update(eeL_pos, eeL_R)
+                # -------- HOME REQUEST (dual arm) --------
+                home_requested = (
+                    (stR is not None and stR.get("home", False)) or
+                    (stL is not None and stL.get("home", False))
+                )
+                if home_requested:
+                    obs = restore_home()
+                    eeR_pos, eeR_R = _get_ee_pose_from_obs(obs, "robot0")
+                    eeL_pos, eeL_R = _get_ee_pose_from_obs(obs, "robot1")
+                    vr_right.start_control(eeR_pos, eeR_R)
+                    if vr_left is not None:
+                        vr_left.start_control(eeL_pos, eeL_R)
+                    continue
+                # ----------------------------------------
 
-                # Apply both (packing handled inside apply_action)
                 if stR is not None or stL is not None:
                     obs, _, _, _ = apply_action(env, stR, stL)
 
