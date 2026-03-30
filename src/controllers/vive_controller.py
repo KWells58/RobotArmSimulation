@@ -185,10 +185,10 @@ class ViveController:
         right = None
         left = None
         for i in range(openvr.k_unMaxTrackedDeviceCount):
-            if self.vrsys.getTrackedDeviceClass(i) != openvr.TrackedDeviceClass_Controller:
+            if self.vrsys.getTrackedDeviceClass(i) != openvr.TrackedDeviceClass_Controller: # type: ignore
                 continue
             controllers.append(i)
-            role = self.vrsys.getControllerRoleForTrackedDeviceIndex(i)
+            role = self.vrsys.getControllerRoleForTrackedDeviceIndex(i) # type: ignore
             if role == openvr.TrackedControllerRole_RightHand:
                 right = i
             elif role == openvr.TrackedControllerRole_LeftHand:
@@ -204,7 +204,7 @@ class ViveController:
         if self.device_id is None:
             return False, np.eye(3), np.zeros(3)
 
-        poses = self.vrsys.getDeviceToAbsoluteTrackingPose(
+        poses = self.vrsys.getDeviceToAbsoluteTrackingPose( # type: ignore
             self.universe, 0, openvr.k_unMaxTrackedDeviceCount
         )
 
@@ -234,7 +234,7 @@ class ViveController:
         if self.device_id is None:
             return None
         try:
-            _, state = self.vrsys.getControllerState(int(self.device_id))
+            _, state = self.vrsys.getControllerState(int(self.device_id)) # type: ignore
             return state
         except Exception:
             return None
@@ -341,10 +341,10 @@ class ViveController:
             target_drot = np.zeros(3, dtype=np.float32)
         else:
             # ---------------- translation (unchanged) ----------------
-            dpos_vr = (p_vr - self.ctrl_pos_at_clutch_vr).astype(np.float64)
+            dpos_vr = (p_vr - self.ctrl_pos_at_clutch_vr).astype(np.float64) # type: ignore
             dpos_rob = (self._VRPOS_TO_ROB @ dpos_vr).astype(np.float64)
 
-            target_pos = self.ee_pos_at_clutch + self.pos_scale * dpos_rob
+            target_pos = self.ee_pos_at_clutch + self.pos_scale * dpos_rob # type: ignore
 
             dpos = (target_pos - ee_pos).astype(np.float32)
             dpos[np.abs(dpos) < self.deadzone_pos] = 0.0
